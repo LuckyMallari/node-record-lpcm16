@@ -1,7 +1,8 @@
 'use strict'
 
 var spawn = require('child_process').spawn
-
+var isPi = require('detect-rpi');
+var os = require('os');
 var cp // Recording process
 
 // returns a Readable stream
@@ -17,36 +18,58 @@ exports.start = function (options) {
     thresholdEnd: null,
     silence: '1.0',
     verbose: false,
-    recordProgram: 'rec'
-  }
+    recordProgram: 'auto'
+  };
 
-  options = Object.assign(defaults, options)
+  options = Object.assign(defaults, options);
 
   // Capture audio stream
-  var cmd, cmdArgs, cmdOptions
+  var cmd, cmdArgs, cmdOptions;
+
+  if (options.recordProgram === 'auto') {
+    switch (os.type()) {
+      // MAC
+      case 'Windows_NT': {
+        options.recordProgram = 'sox';
+        break;
+      }
+      default:
+      case 'Linux':
+      case 'SunOS':
+      case 'Darwin': {
+        options.recordProgram = 'rec';
+        if (isPi()){
+          options.recordProgram = 'arecord';
+        }
+        break;
+      }
+    }
+  }
+
   switch (options.recordProgram) {
     // On some Windows machines, sox is installed using the "sox" binary
     // instead of "rec"
     case 'sox':
     case 'rec':
     default:
-      cmd = options.recordProgram
+      cmd = options.recordProgram;
       cmdArgs = [
         '-q',                     // show no progress
         '-r', options.sampleRate, // sample rate
         '-c', options.channels,   // channels
         '-e', 'signed-integer',   // sample encoding
         '-b', '16',               // precision (bits)
-        '-t', 'wav',              // audio type
-        '-',                      // pipe
-            // end on silence
+        '-t', 'waveaudio',        // audio type
+        '-d',                     // default capture
+        '-p',                     // pipe
         'silence', '1', '0.1', options.thresholdStart || options.threshold + '%',
         '1', options.silence, options.thresholdEnd || options.threshold + '%'
       ]
+
       break
     // On some systems (RasPi), arecord is the prefered recording binary
     case 'arecord':
-      cmd = 'arecord'
+      cmd = 'arecord';
       cmdArgs = [
         '-q',                     // show no progress
         '-r', options.sampleRate, // sample rate
@@ -54,44 +77,44 @@ exports.start = function (options) {
         '-t', 'wav',              // audio type
         '-f', 'S16_LE',           // Sample format
         '-'                       // pipe
-      ]
+      ];
       if (options.device) {
-        cmdArgs.unshift('-D', options.device)
+        cmdArgs.unshift('-D', options.device);
       }
-      break
+      break;
   }
 
   // Spawn audio capture command
-  cmdOptions = { encoding: 'binary' }
+  cmdOptions = { encoding: 'binary' };
   if (options.device) {
-    cmdOptions.env = Object.assign({}, process.env, { AUDIODEV: options.device })
+    cmdOptions.env = Object.assign({}, process.env, { AUDIODEV: options.device });
   }
-  cp = spawn(cmd, cmdArgs, cmdOptions)
-  var rec = cp.stdout
+  cp = spawn(cmd, cmdArgs, cmdOptions);
+  var rec = cp.stdout;
 
   if (options.verbose) {
-    console.log('Recording', options.channels, 'channels with sample rate',
-        options.sampleRate + '...')
-    console.time('End Recording')
+    console.log('Command: ', options.recordProgram, cmdArgs.join(" "));
+    console.log('Recording', options.channels, 'channels with sample rate', options.sampleRate + '...');
+    console.time('End Recording');
 
     rec.on('data', function (data) {
-      console.log('Recording %d bytes', data.length)
+      console.log('Recording %d bytes', data.length);
     })
 
     rec.on('end', function () {
-      console.timeEnd('End Recording')
+      console.timeEnd('End Recording');
     })
   }
 
-  return rec
+  return rec;
 }
 
 exports.stop = function () {
   if (!cp) {
-    console.log('Please start a recording first')
+    console.log('Please start a recording first');
     return false
   }
 
-  cp.kill() // Exit the spawned process, exit gracefully
-  return cp
+  cp.kill(); // Exit the spawned process, exit gracefully
+  return cp;
 }
